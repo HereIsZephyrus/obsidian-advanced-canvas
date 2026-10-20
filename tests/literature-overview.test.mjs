@@ -1,6 +1,7 @@
 // Implemented by Codex (LLM agent): verify polyline routing with distributed boundary ports.
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import {readFileSync} from 'node:fs'
 import {build} from 'esbuild'
 import {AvoidLib} from '../node_modules/libavoid-js/dist/index-node.mjs'
 import {pathHits, intersects} from '../dist/literature-engine.mjs'
@@ -47,4 +48,14 @@ test('moving an intervening obstacle invalidates only obstructed paths',()=>{
   after.nodes[3].y=-40
   const r=routeOverview(A,after,saved);check(after,r)
   assert(r.report.rerouted.includes('ab'))
+})
+test('a retained label near the target port cannot send a new route through its card',()=>{
+  // Codex (LLM agent): reduced from an incremental paper insertion with a blocked approach.
+  const {canvas,previous}=JSON.parse(readFileSync(new URL('./fixtures/overview-obstructed-approach.json',import.meta.url)))
+  const result=routeOverview(A,canvas,previous)
+  check(canvas,result)
+  assert(result.report.exterior_routes.includes('bc'))
+  assert.deepEqual(result.routes.ad.points,previous.edges.find(e=>e.id==='ad').literatureRoute.points)
+  const saved=attach(canvas,result)
+  assert.deepEqual(routeOverview(A,saved).routes,result.routes)
 })

@@ -12,6 +12,19 @@ const queue = await import(queueUrl)
 const focusBuild = await build({entryPoints:['src/literature-navigation/focus.ts'],bundle:true,write:false,platform:'node',format:'esm'})
 const {overviewFocus} = await import('data:text/javascript;base64,' + Buffer.from(focusBuild.outputFiles[0].text).toString('base64'))
 
+test('external corpus additions resolve new papers and reject incomplete relation endpoints', () => {
+  const paper = id => ({source:`${id}_content.md`,note:`${id}_notes.md`,tree_path:`${id}_notes.md`})
+  const corpus = {version:1,bundle:{papers:{A:paper('a')},relations:[],endpoint_map:{A:{}}},nodes:{A:{}},sourceHashes:{}}
+  assert.equal(model.paperForPath(model.parseCorpus(JSON.stringify(corpus)),'b_notes.md'),undefined)
+  corpus.bundle.papers.B=paper('b');corpus.nodes.A.method={};corpus.nodes.B={method:{}}
+  corpus.bundle.endpoint_map.A={'r-from':'method'};corpus.bundle.endpoint_map.B={'r-to':'method'}
+  corpus.bundle.relations=[{id:'r',from_paper:'A',to_paper:'B'}]
+  assert.equal(model.paperForPath(model.parseCorpus(JSON.stringify(corpus)),'b_notes.md'),'B')
+  delete corpus.nodes.B.method
+  assert.throws(()=>model.parseCorpus(JSON.stringify(corpus)),/端点缺失/)
+  assert.throws(()=>model.parseCorpus('{'),SyntaxError)
+})
+
 test('renaming a companion also moves its embedded tree without losing the source hash', () => {
   const corpus = {bundle:{papers:{A:{source:'paper_content.md',note:'paper_notes.md',tree_path:'paper_notes.md'}}},
     sourceHashes:{'paper_content.md':'source','paper_notes.md':'note'}}

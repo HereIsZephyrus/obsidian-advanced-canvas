@@ -9,7 +9,7 @@ import {overviewFocus} from './focus'
 import {
   NAV_VIEW, STORE, type Corpus, type Config, type NavState, type NavPosition, type ViewSpec, type Job,
   type Relation, type Heading, pairId, paperForPath, relationsFor, sideFor, endpoint, quotes,
-  shortAuthor, headingAt, headings, locateQuote, relationInHeading, relationLabels, safeRelative, renamePaperPaths
+  shortAuthor, headingAt, headings, locateQuote, relationInHeading, relationLabels, safeRelative, renamePaperPaths, parseCorpus
 } from './model'
 
 type NodeData = {id: string; width?: number; height?: number; literatureCanvas?: {paper?: string; node?: string}}
@@ -57,6 +57,8 @@ export default class LiteratureNavigationController {
   private forks = new Map<string, string>()
   private timer?: number
   private positionTimer?: number
+  private corpusStamp?: string
+  private corpusRefresh?: Promise<boolean>
   private evidence?: {paper: string; relation: string; side: 'from' | 'to'; status: string; quote: string}
   private focus = new WeakMap<Canvas, ReturnType<typeof overviewFocus>>()
 
@@ -100,7 +102,7 @@ export default class LiteratureNavigationController {
     }))
     const indexChanged = (file: TAbstractFile) => {
       if (file instanceof TFile && file.extension === 'canvas' && this.config && file.path.startsWith(this.config.root + '/'))
-        this.run(() => this.indexFile(file))
+        this.run(async () => { await this.reloadCorpus(); await this.indexFile(file) })
       else if (file.path === this.currentPath()) this.schedule()
     }
     plugin.registerEvent(plugin.app.vault.on('create', indexChanged))
@@ -125,6 +127,11 @@ export default class LiteratureNavigationController {
       this.plugin.app.workspace.getLeavesOfType(NAV_VIEW).forEach(leaf => leaf.detach())
     })
     this.ready = this.load()
+    plugin.registerInterval(window.setInterval(() => {
+      if (this.corpus && !this.disposed) this.run(async () => {
+        if (await this.reloadCorpus()) { await this.rebuild(); this.schedule() }
+      })
+    }, 1500))
   }
   private run(action: () => Promise<unknown>) {
     void action().catch(error => { if (!this.disposed) new Notice(`文献关系：${String(error.message || error)}`, 8000); console.error('[Literature navigation]', error) })
@@ -140,8 +147,7 @@ export default class LiteratureNavigationController {
     try {
       this.config = JSON.parse(await adapter.read(`${STORE}/config.json`)) as Config
       if (!safeRelative(this.config.root) || !safeRelative(this.config.corpus)) throw new Error('导航配置路径无效')
-      this.corpus = JSON.parse(await adapter.read(this.config.corpus)) as Corpus
-      if (this.corpus.version !== 1) throw new Error('不支持此导航数据版本')
+      await this.reloadCorpus()
       await waitForWrites(this.basePath())
       if (await adapter.exists(`${STORE}/state.json`)) this.state = JSON.parse(await adapter.read(`${STORE}/state.json`)) as NavState
       for (const job of this.state.jobs) if (job.status === 'running') job.status = 'pending'
@@ -153,6 +159,24 @@ export default class LiteratureNavigationController {
         await this.work()
       }))
     } catch (error) { new Notice(`文献导航未加载：${String(error)}`, 10000) }
+  }
+  private async reloadCorpus(): Promise<boolean> {
+    if (!this.config || this.disposed) return false
+    if (this.corpusRefresh) return this.corpusRefresh
+    const path = this.config.corpus, adapter = this.plugin.app.vault.adapter
+    this.corpusRefresh = (async () => {
+      const stat = await adapter.stat(path)
+      if (!stat || stat.type !== 'file') throw new Error('文献语料文件不存在')
+      const stamp = `${path}:${stat.mtime}:${stat.size}`
+      if (stamp === this.corpusStamp) return false
+      const next = parseCorpus(await adapter.read(path))
+      if (this.disposed || path !== this.config?.corpus) return false
+      this.corpus = next
+      this.corpusStamp = stamp
+      return true
+    })()
+    try { return await this.corpusRefresh }
+    finally { this.corpusRefresh = undefined }
   }
   private async persist() {
     const body = JSON.stringify(this.state, null, 2)
@@ -208,6 +232,7 @@ export default class LiteratureNavigationController {
     this.timer = window.setTimeout(() => this.run(() => this.refresh()), 100)
   }
   async refresh() {
+    await this.reloadCorpus()
     if (!this.corpus || this.disposed) return
     const serial = ++this.refreshSerial, path = this.currentPath()
     if (!this.navigating && this.lastPosition?.path !== path && this.lastPosition?.viewport) {
@@ -436,6 +461,7 @@ export default class LiteratureNavigationController {
   async openPair(a: string, b: string, focus?: string[]) {
     const intent = ++this.navigationIntent
     await this.ready
+    await this.reloadCorpus()
     if (!this.config || !this.corpus || a === b || !this.corpus.bundle.papers[a] || !this.corpus.bundle.papers[b]) throw new Error('无效文献对')
     const id = pairId(a, b)
     const spec = this.state.views[id] || {id, kind: 'pair', path: `${this.config.root}/内容关系/${id}.canvas`, papers: [a, b].sort(), revision: 1}
@@ -453,6 +479,8 @@ export default class LiteratureNavigationController {
     return [...result].sort((a, b) => this.corpus!.bundle.papers[a].title.localeCompare(this.corpus!.bundle.papers[b].title))
   }
   async extend(viewId: string, paper: string) {
+    await this.ready
+    await this.reloadCorpus()
     const intent = ++this.navigationIntent
     if (!this.corpus?.bundle.papers[paper]) throw new Error('未知文献')
     const fork = this.forks.get(viewId)

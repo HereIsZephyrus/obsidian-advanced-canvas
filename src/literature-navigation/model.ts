@@ -29,6 +29,27 @@ export type NavPosition = {
 export type Job = {id: string; view: ViewSpec; basePath?: string; status: 'pending' | 'running' | 'done' | 'failed'; error?: string}
 export type NavState = {version: number; views: Record<string, ViewSpec>; jobs: Job[]; history: NavPosition[]; positions?: Record<string, NavPosition>}
 export type Config = {version: number; root: string; python: string; tools: string; corpus: string}
+// Codex (LLM agent): reject incomplete external corpus updates before replacing live data.
+export function parseCorpus(text: string): Corpus {
+  const value = JSON.parse(text) as Corpus
+  if (value?.version !== 1 || !value.bundle?.papers || !Array.isArray(value.bundle.relations) ||
+      !value.bundle.endpoint_map || !value.nodes || !value.sourceHashes) throw new Error('文献语料结构不完整')
+  for (const [key, paper] of Object.entries(value.bundle.papers)) {
+    if (!value.nodes[key] || !value.bundle.endpoint_map[key] ||
+        ![paper.source, paper.note, paper.tree_path].every(p => typeof p === 'string' && safeRelative(p)))
+      throw new Error(`文献路径或树节点无效：${key}`)
+  }
+  const ids = new Set<string>()
+  for (const relation of value.bundle.relations) {
+    if (!relation.id || ids.has(relation.id)) throw new Error('文献关系 ID 重复或缺失')
+    ids.add(relation.id)
+    for (const side of ['from', 'to'] as const) {
+      const paper = relation[`${side}_paper`], node = value.bundle.endpoint_map[paper]?.[`${relation.id}-${side}`]
+      if (!value.bundle.papers[paper] || !node || !value.nodes[paper]?.[node]) throw new Error(`文献关系端点缺失：${relation.id}`)
+    }
+  }
+  return value
+}
 export const relationLabels: Record<string, string> = Object.fromEntries(relationStyles.map(s => [s.type, s.label]))
 export function pairId(a: string, b: string): string { return `pair-${[a, b].sort().join('-')}` }
 export function paperForPath(corpus: Corpus, path: string): string | undefined {

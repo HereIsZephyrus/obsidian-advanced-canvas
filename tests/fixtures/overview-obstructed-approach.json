@@ -1,0 +1,265 @@
+{
+  "canvas": {
+    "nodes": [
+      {
+        "type": "text",
+        "x": 6920,
+        "y": 2357,
+        "width": 380,
+        "height": 170,
+        "id": "a"
+      },
+      {
+        "type": "text",
+        "x": 5043,
+        "y": 1670,
+        "width": 380,
+        "height": 118,
+        "id": "b"
+      },
+      {
+        "type": "text",
+        "x": 6310,
+        "y": 2435,
+        "width": 380,
+        "height": 118,
+        "id": "c"
+      },
+      {
+        "type": "text",
+        "x": 5700,
+        "y": 2307,
+        "width": 380,
+        "height": 170,
+        "id": "d"
+      },
+      {
+        "type": "text",
+        "x": 5898,
+        "y": 1311,
+        "width": 380,
+        "height": 144,
+        "id": "e"
+      }
+    ],
+    "edges": [
+      {
+        "label": "结果一致",
+        "id": "ad",
+        "fromNode": "a",
+        "toNode": "d"
+      },
+      {
+        "label": "引用结果",
+        "id": "bc",
+        "fromNode": "b",
+        "toNode": "c"
+      },
+      {
+        "label": "引用结果",
+        "id": "ce",
+        "fromNode": "c",
+        "toNode": "e"
+      }
+    ]
+  },
+  "previous": {
+    "nodes": [
+      {
+        "type": "text",
+        "x": 6920,
+        "y": 2357,
+        "width": 380,
+        "height": 170,
+        "id": "a"
+      },
+      {
+        "type": "text",
+        "x": 5049,
+        "y": 1670,
+        "width": 380,
+        "height": 118,
+        "id": "b"
+      },
+      {
+        "type": "text",
+        "x": 6310,
+        "y": 2435,
+        "width": 380,
+        "height": 118,
+        "id": "c"
+      },
+      {
+        "type": "text",
+        "x": 5700,
+        "y": 2307,
+        "width": 380,
+        "height": 170,
+        "id": "d"
+      },
+      {
+        "type": "text",
+        "x": 5898,
+        "y": 1319,
+        "width": 380,
+        "height": 144,
+        "id": "e"
+      }
+    ],
+    "edges": [
+      {
+        "label": "结果一致",
+        "literatureRoute": {
+          "version": 1,
+          "engine": "libavoid-polyline-v1",
+          "points": [
+            {
+              "x": 6920,
+              "y": 2442
+            },
+            {
+              "x": 6080,
+              "y": 2368.333
+            }
+          ],
+          "fromSide": "left",
+          "toSide": "right",
+          "fromPort": {
+            "x": 6920,
+            "y": 2442
+          },
+          "toPort": {
+            "x": 6080,
+            "y": 2368.333
+          },
+          "endpoints": [
+            [
+              6920,
+              2357,
+              380,
+              170
+            ],
+            [
+              5700,
+              2307,
+              380,
+              170
+            ]
+          ],
+          "label": "结果一致",
+          "labelBox": {
+            "x": 6379.2307692307695,
+            "y": 2384.0831346153846,
+            "width": 80,
+            "height": 28
+          }
+        },
+        "id": "ad",
+        "fromNode": "a",
+        "toNode": "d"
+      },
+      {
+        "label": "引用结果",
+        "literatureRoute": {
+          "version": 1,
+          "engine": "libavoid-polyline-v1",
+          "points": [
+            {
+              "x": 5239,
+              "y": 1788
+            },
+            {
+              "x": 6412,
+              "y": 2435
+            }
+          ],
+          "fromSide": "bottom",
+          "toSide": "top",
+          "fromPort": {
+            "x": 5239,
+            "y": 1788
+          },
+          "toPort": {
+            "x": 6412,
+            "y": 2435
+          },
+          "endpoints": [
+            [
+              5049,
+              1670,
+              380,
+              118
+            ],
+            [
+              6310,
+              2435,
+              380,
+              118
+            ]
+          ],
+          "label": "引用结果",
+          "labelBox": {
+            "x": 5785.5,
+            "y": 2097.5,
+            "width": 80,
+            "height": 28
+          }
+        },
+        "id": "bc",
+        "fromNode": "b",
+        "toNode": "c"
+      },
+      {
+        "label": "引用结果",
+        "literatureRoute": {
+          "version": 1,
+          "engine": "libavoid-polyline-v1",
+          "points": [
+            {
+              "x": 6500,
+              "y": 2435
+            },
+            {
+              "x": 6146.667,
+              "y": 1463
+            }
+          ],
+          "fromSide": "top",
+          "toSide": "bottom",
+          "fromPort": {
+            "x": 6500,
+            "y": 2435
+          },
+          "toPort": {
+            "x": 6146.667,
+            "y": 1463
+          },
+          "endpoints": [
+            [
+              6310,
+              2435,
+              380,
+              118
+            ],
+            [
+              5898,
+              1319,
+              380,
+              144
+            ]
+          ],
+          "label": "引用结果",
+          "labelBox": {
+            "x": 6283.333500000001,
+            "y": 1935,
+            "width": 80,
+            "height": 28
+          }
+        },
+        "id": "ce",
+        "fromNode": "c",
+        "toNode": "e"
+      }
+    ]
+  }
+}

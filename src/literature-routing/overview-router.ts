@@ -1,6 +1,6 @@
 // Implemented by Codex (LLM agent): distributed boundary ports and short obstacle-avoiding overview paths.
 import type {AvoidRuntime, ConnectorHandle} from './avoid-runtime'
-import {type Drawing, type Edge, type Node, type Point, type Route, type Side,
+import {type Drawing, type Edge, type Node, type Point, type Route, type Side, type Box,
   geometry, clearPath, hasRouteGeometry, shape, simplify, placeLabel, expand, intersects, pathHits, nudge} from './router'
 
 const ENGINE = 'libavoid-polyline-v1'
@@ -30,11 +30,45 @@ export function validOverviewRoute(route: Route | undefined, edge: Edge, nodes: 
     distance(route.points[0], route.fromPort!) < .01 && distance(route.points.at(-1)!, route.toPort!) < .01 && clearPath(route.points, nodes, edge)
 }
 
+// Codex (LLM agent): attached polyline pins can return through their own card when
+// another obstacle blocks the approach. Route between exterior points instead,
+// so both endpoint cards remain ordinary obstacles throughout the search.
+function exteriorRoute(A: AvoidRuntime, edge: Edge, nodes: Node[], reserved: Box[], from: Port, to: Port): Point[] {
+  const outside = (p: Port): Point => ({
+    x: p.point.x + (p.side === 'left' ? -8 : p.side === 'right' ? 8 : 0),
+    y: p.point.y + (p.side === 'top' ? -8 : p.side === 'bottom' ? 8 : 0)
+  })
+  const a = outside(from), b = outside(to)
+  for (const mode of [1, 2]) {
+    const router = new A.Router(mode)
+    try {
+      router.setRoutingParameter(A.RoutingParameter.shapeBufferDistance, 4)
+      router.setRoutingParameter(A.RoutingParameter.segmentPenalty, 50)
+      for (const node of nodes) shape(A, router, node)
+      for (const box of reserved) shape(A, router, expand(box, 3))
+      const p = new A.Point(a.x, a.y), q = new A.Point(b.x, b.y)
+      const start = new A.ConnEnd(p), end = new A.ConnEnd(q)
+      const conn = new A.ConnRef(router, start, end)
+      p.delete(); q.delete(); start.delete(); end.delete()
+      router.processTransaction()
+      const line = conn.displayRoute(), points: Point[] = [from.point]
+      for (let i = 0; i < line.size(); i++) {
+        const point = line.at(i); points.push({x: point.x, y: point.y}); point.delete()
+      }
+      points.push(to.point)
+      const path = simplify(points)
+      if (line.size() >= 2 && clearPath(path, nodes, edge) &&
+          !reserved.some(box => pathHits(path, expand(box, 3)))) return path
+    } finally { router.delete() }
+  }
+  throw new Error(`No collision-free overview route: ${edge.id}`)
+}
+
 export function routeOverview(A: AvoidRuntime, drawing: Drawing, previous?: Drawing) {
   const nodes = drawing.nodes.filter(n => n.type !== 'group').slice().sort((a,b) => a.id.localeCompare(b.id))
   const edges = drawing.edges.slice().sort((a,b) => a.id.localeCompare(b.id)), byId = new Map(nodes.map(n => [n.id,n]))
   const old = new Map((previous?.edges || drawing.edges).map(e => [e.id,e.literatureRoute]))
-  const routes = new Map<string,Route>(), dirty: Edge[] = []
+  const routes = new Map<string,Route>(), dirty: Edge[] = [], exterior: string[] = []
   for (const edge of edges) {
     if (!byId.has(edge.fromNode) || !byId.has(edge.toNode)) throw new Error(`Missing overview endpoint: ${edge.id}`)
     const cached = old.get(edge.id)
@@ -97,8 +131,12 @@ export function routeOverview(A: AvoidRuntime, drawing: Drawing, previous?: Draw
       for (const edge of dirty) {
         const line=conns.get(edge.id)!.displayRoute(), points:Point[]=[]
         for(let i=0;i<line.size();i++){const p=line.at(i);points.push({x:p.x,y:p.y});p.delete()}
-        const ps=simplify(points), from=portMap.get(`${edge.id}:from`)!, to=portMap.get(`${edge.id}:to`)!
-        if(ps.length<2 || !clearPath(ps,nodes,edge)) throw new Error(`Overview route intersects a card: ${edge.id}`)
+        const from=portMap.get(`${edge.id}:from`)!, to=portMap.get(`${edge.id}:to`)!
+        let ps=simplify(points)
+        if(ps.length<2 || !clearPath(ps,nodes,edge)) {
+          ps = exteriorRoute(A, edge, nodes, reserved, from, to)
+          exterior.push(edge.id)
+        }
         routes.set(edge.id,{version:1,engine:ENGINE,points:ps,fromSide:from.side,toSide:to.side,fromPort:ps[0],toPort:ps.at(-1),
           endpoints:[geometry(byId.get(edge.fromNode)!),geometry(byId.get(edge.toNode)!)],label:edge.label||''})
       }
@@ -111,7 +149,7 @@ export function routeOverview(A: AvoidRuntime, drawing: Drawing, previous?: Draw
     const route=routes.get(edge.id)!;route.label=edge.label||'';delete route.labelBox;delete route.leader
     placeLabel(A,edge,route,nodes,labels,routes,old.get(edge.id))
   }
-  return {routes:Object.fromEntries(routes),report:{engine:ENGINE,edges:edges.length,rerouted:dirty.map(e=>e.id),preserved_paths:edges.length-dirty.length,
+  return {routes:Object.fromEntries(routes),report:{engine:ENGINE,edges:edges.length,rerouted:dirty.map(e=>e.id),preserved_paths:edges.length-dirty.length,exterior_routes:exterior,
     direct_paths:[...routes.values()].filter(r=>r.points.length===2).length,
     bends:[...routes.values()].reduce((sum,r)=>sum+r.points.length-2,0)}}
 }

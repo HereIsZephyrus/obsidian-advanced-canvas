@@ -28,9 +28,9 @@ Evidence links select a unique source quotation in the editor without changing t
 
 Each generated Canvas stores its view descriptor under `metadata.literatureNavigation`. Nodes retain their existing paper and tree identities. Detail relationships retain their original evidence.
 
-Both views use the shared obstacle router. Overview paths use distributed boundary ports and diagonal segments where clear. Content views use orthogonal paths. Paths and labels avoid cards. Edge crossings remain possible.
+Both views use the shared obstacle router. Overview paths use distributed boundary ports and diagonal segments where clear. If an attached endpoint produces a path through its own card, the router retries through exterior points and checks the complete path again. Content views use orthogonal paths. Paths and labels avoid cards. Edge crossings remain possible.
 
-`.literature-navigation/corpus.json` contains the frozen corpus, source hashes, and tree-node index. `state.json` stores view paths, queue jobs, navigation history, and viewports. The registry can be rebuilt from generated Canvas metadata. Historical experiment snapshots have no navigation descriptor and stay outside this registry.
+`.literature-navigation/corpus.json` contains the accepted corpus, source hashes, and tree-node index. The controller checks for external updates every 1.5 seconds and before navigation actions. It validates paper paths and relationship endpoints before replacing live data. New papers then become available without another plugin reload. Installing changed plugin code still requires one reload. `state.json` stores view paths, queue jobs, navigation history, and viewports. The registry can be rebuilt from generated Canvas metadata. Historical experiment snapshots have no navigation descriptor and stay outside this registry.
 
 Canvas creation, modification, rename, and deletion update discovery. The generator reconstructs a removed view from its retained descriptor. Source renames update the explicit file mapping. The locator checks source edits when opening evidence. A rename does not change paper or view identity.
 
@@ -51,7 +51,7 @@ The separate publication tool inserts trees after frontmatter and the existing H
 
 ## Installation and validation
 
-Build with `npm run build`, then use `literature-canvas-tools/scripts/install_canvas_plugin.py` to install into the preview vault with backups. Reload Advanced Canvas afterward.
+Build with `npm run build`. Install `main.js`, `styles.css`, `manifest.json`, `literature-worker.js`, `libavoid.wasm`, and `libavoid-LICENSE` from `dist/` into the vault's `.obsidian/plugins/advanced-canvas/`. Keep the tools checkout's shared router assets in sync with this build. Update existing files without extra backup copies, then reload Advanced Canvas.
 
 For a new preview, initialize navigation from the selected network:
 
