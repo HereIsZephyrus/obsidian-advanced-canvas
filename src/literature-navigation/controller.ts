@@ -564,7 +564,6 @@ export default class LiteratureNavigationController {
             await this.flush(job.view.path)
             const content = JSON.stringify(result.canvas, null, 2)
             if (file instanceof TFile) {
-              await vault.adapter.write(`${STORE}/backup-${job.id}.json`, before!)
               await vault.process(file, current => {
                 if (current !== before) throw new Error('生成期间 Canvas 被修改，已保留你的修改。可重试合并。')
                 return content

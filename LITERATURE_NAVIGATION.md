@@ -34,7 +34,9 @@ Both views use the shared obstacle router. Overview paths use distributed bounda
 
 Canvas creation, modification, rename, and deletion update discovery. The generator reconstructs a removed view from its retained descriptor. Source renames update the explicit file mapping. The locator checks source edits when opening evidence. A rename does not change paper or view identity.
 
-The worker flushes native Canvas saves before reading and before committing. A concurrent edit rejects the replacement. **重试** uses the current drawing and preserves manual annotations. An interrupted job resumes after plugin reload. State writes share one queue across plugin instances and use unique temporary files. Backups of replaced drawings remain in the hidden navigation directory.
+The worker flushes native Canvas saves before reading and before committing. A concurrent edit rejects the replacement. **重试** uses the current drawing and preserves manual annotations. An interrupted job resumes after plugin reload. State writes share one queue across plugin instances and use unique temporary files. Updates create no backup copies.
+
+The main ecohydrology vault stores generated views under `network/`. Its existing Remote Sync configuration handles synchronization. Companion notes retain their trees and links to these views.
 
 This preview uses one desktop Obsidian process. Its generator requires Python 3.12, Node.js, Graphviz, and the existing `literature-canvas-tools` checkout. `config.json` records the local interpreter and checkout paths. Other computers need their own valid generator paths. Mobile generation and multiple concurrent writers are outside this implementation.
 
@@ -71,4 +73,4 @@ Run `scripts/check_overview_ui.cjs` for all 50 rendered cards, segment colors, a
 
 The focus regression runs on Obsidian 1.14.4. It checks pointer movement, clicks, and centers for uninitialized offscreen edges. Managed edges calculate their centers from saved geometry. Other uninitialized edges use their endpoint bounds until native curve data becomes available.
 
-Disable Advanced Canvas to stop navigation. Each drawing remains an ordinary Canvas file with one fallback color per edge. Multiple color segments and obstacle routing require this plugin. Keep the installation backup to restore the preceding plugin build.
+Disable Advanced Canvas to stop navigation. Each drawing remains an ordinary Canvas file with one fallback color per edge. Multiple color segments and obstacle routing require this plugin.

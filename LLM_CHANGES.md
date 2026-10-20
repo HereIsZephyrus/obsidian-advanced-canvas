@@ -4,6 +4,7 @@ Codex, an LLM agent, implemented the literature routing and navigation integrati
 
 | Files | Change made by Codex |
 | --- | --- |
+| `src/literature-navigation/controller.ts`, `LITERATURE_NAVIGATION.md` | Update existing drawings without backup copies. Document the main vault's `network/` location and Remote Sync. |
 | `package.json`, `package-lock.json` | Pin `libavoid-js@0.5.0-beta.5` and add build and routing-test commands. |
 | `scripts/build-literature.mjs` | Bundle the shared engine for Node.js, the browser worker, and tests. Copy the WASM binary and license. |
 | `scripts/route-literature.ts` | Read Canvas JSON from stdin and return routes and diagnostics. |
