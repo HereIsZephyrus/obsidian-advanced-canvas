@@ -1,3 +1,5 @@
+// Modified by Codex (LLM agent): include routed segments in edge bounds.
+import { type Route, hasRouteGeometry, routeCenter } from "../literature-routing/router"
 /* eslint-disable-next-line import/no-extraneous-dependencies -- Included in Obsidian */
 import { EditorView, ViewUpdate } from "@codemirror/view"
 import { around } from "monkey-around"
@@ -11,6 +13,9 @@ import Patcher, { invoke } from "./patcher"
 
 export default class CanvasPatcher extends Patcher {
   protected async patch() {
+    // Fixed by Codex (LLM agent): the base constructor calls patch before derived
+    // fields exist. Rebuilding open views must wait for elementUninstallers.
+    await Promise.resolve()
     // Check if there are already loaded canvas view leafs
     const loadedCanvasViewLeafs = this.plugin.app.workspace.getLeavesOfType("canvas")
       .filter((leaf: WorkspaceLeaf) => !requireApiVersion('1.7.2') || !leaf.isDeferred)
@@ -275,9 +280,9 @@ export default class CanvasPatcher extends Patcher {
       }),
       clear: Patcher.OverrideExisting(next => function (...args: Parameters<typeof next>): void {
         this.isClearing = true
-        const result = invoke(next, this, ...args)
-        this.isClearing = false
-        return result
+        // Fixed by Codex (LLM agent): failed teardown must not freeze future updates.
+        try { return invoke(next, this, ...args) }
+        finally { this.isClearing = false }
       }),
       /*setData: Patcher.OverrideExisting(next => function (...args: any): void {
         //
@@ -483,6 +488,15 @@ export default class CanvasPatcher extends Patcher {
 
     const uninstallers: Array<() => void> = []
     Patcher.patch<CanvasEdge>(this.plugin, edge, {
+      getBBox: Patcher.OverrideExisting(next => function (...args: Parameters<typeof next>): BBox {
+        const box = invoke(next, this, ...args)
+        const route = (this.getData() as CanvasEdgeData & { literatureRoute?: Route }).literatureRoute
+        if (!hasRouteGeometry(route)) return box
+        const points = [...route.points, ...(route.leader ?? [])]
+        if (route.labelBox) points.push({x: route.labelBox.x, y: route.labelBox.y}, {x: route.labelBox.x + route.labelBox.width, y: route.labelBox.y + route.labelBox.height})
+        return {minX: Math.min(box.minX, ...points.map(p => p.x)), minY: Math.min(box.minY, ...points.map(p => p.y)),
+          maxX: Math.max(box.maxX, ...points.map(p => p.x)), maxY: Math.max(box.maxY, ...points.map(p => p.y))}
+      }),
       setData: Patcher.OverrideExisting(next => function (data: CanvasEdgeData, addHistory?: boolean): void {
         const unchanged = JSON.stringify(this.getData()) === JSON.stringify(data)
         const result = invoke(next, this, data)
@@ -516,7 +530,16 @@ export default class CanvasPatcher extends Patcher {
         return result
       }),
       getCenter: Patcher.OverrideExisting(next => function (...args: Parameters<typeof next>): Position {
-        const result = invoke(next, this, ...args)
+        // Fixed by Codex (LLM agent): selection can request centers for offscreen,
+        // uninitialized edges. Native getCenter assumes a Bezier already exists.
+        const route = (this.getData() as CanvasEdgeData & {literatureRoute?: Route}).literatureRoute
+        let result: Position
+        if (hasRouteGeometry(route)) result = routeCenter(route)
+        else if (this.bezier) result = invoke(next, this, ...args)
+        else {
+          const box = this.getBBox()
+          result = {x:(box.minX+box.maxX)/2,y:(box.minY+box.maxY)/2}
+        }
         that.plugin.app.workspace.trigger('advanced-canvas:edge-center-requested', this.canvas, this, result)
         return result
       }),

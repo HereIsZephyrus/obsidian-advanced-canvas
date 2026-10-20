@@ -1,3 +1,4 @@
+// Modified by Codex (LLM agent): leave persisted literature paths to their renderer.
 import { BBox, Canvas, CanvasEdge, CanvasElement, CanvasNode, Position } from "src/@types/Canvas"
 import { CanvasNodeData } from "src/@types/AdvancedJsonCanvas"
 import BBoxHelper from "src/utils/bbox-helper"
@@ -138,6 +139,7 @@ export default class EdgeStylesExtension extends CanvasExtension {
     }
 
     const edgeData = edge.getData()
+    if ('literatureRoute' in edgeData) return
 
     // Reset path to default
     if (!edge.bezier) return

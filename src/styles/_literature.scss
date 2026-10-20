@@ -1,0 +1,43 @@
+/* Implemented by Codex (LLM agent): compact generated section and heading cards. */
+.canvas-node:has(.literature-section, .literature-heading) .markdown-preview-view {
+  padding: 10px 12px !important;
+  display: flex;
+  flex-direction: row !important;
+  align-items: center;
+  justify-content: center;
+  scrollbar-gutter: auto;
+  scrollbar-width: none;
+}
+.canvas-node:has(.literature-section, .literature-heading) .markdown-preview-sizer {
+  width: 100%;
+  flex: none !important;
+  height: auto !important;
+  contain: none;
+  min-height: 0 !important;
+  padding: 0 !important;
+  text-align: center;
+}
+.canvas-node:has(.literature-section, .literature-heading) .el-p:has(.literature-section, .literature-heading),
+.canvas-node:has(.literature-section, .literature-heading) .markdown-preview-pusher {
+  display: none;
+}
+.canvas-node:has(.literature-section, .literature-heading) p {
+  margin: 0;
+  font-size: 18px;
+  line-height: 25px;
+  font-weight: 600;
+  font-family: system-ui, sans-serif;
+  text-align: center;
+}
+.canvas-node:has(.literature-section) p {
+  font-size: 22px;
+  line-height: 28px;
+}
+.canvas-node:has(.literature-section, .literature-heading) a {
+  color: var(--text-normal);
+  font-weight: inherit;
+  text-decoration: none;
+}
+.canvas-node:has(.literature-section, .literature-heading) a:hover {
+  text-decoration: underline;
+}

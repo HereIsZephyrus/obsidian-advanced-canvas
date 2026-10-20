@@ -1,3 +1,4 @@
+// Modified by Codex (LLM agent): preserve the literature router's selected ports.
 import { CanvasData } from "src/@types/AdvancedJsonCanvas"
 import { BBox, Canvas, CanvasEdge, CanvasNode } from "src/@types/Canvas"
 import BBoxHelper from "src/utils/bbox-helper"
@@ -51,6 +52,7 @@ export default class FloatingEdgeCanvasExtension  extends CanvasExtension {
 
   private updateEdgeConnectionSide(edge: CanvasEdge) {
     const edgeData = edge.getData()
+    if ('literatureRoute' in edgeData) return
 
     if (edgeData.fromFloating) {
       const fixedNodeConnectionPoint = BBoxHelper.getCenterOfBBoxSide(edge.to.node.getBBox(), edge.to.side)
@@ -117,6 +119,7 @@ export default class FloatingEdgeCanvasExtension  extends CanvasExtension {
       false
 
     const edgeData = edge.getData()
+    if ('literatureRoute' in edgeData) return
     if (side === 'from' && wasDroppedInFloatingEdgeDropZone == edgeData.fromFloating) return
     if (side === 'to' && wasDroppedInFloatingEdgeDropZone == edgeData.toFloating) return
 

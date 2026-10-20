@@ -1,0 +1,7 @@
+[
+  {"type": "inherits", "label": "继承／采用", "color": "#62A8FF"},
+  {"type": "same_method", "label": "相同方法", "color": "#43C9C2"},
+  {"type": "uses_result", "label": "引用结果", "color": "#EBC35F"},
+  {"type": "agrees", "label": "结果一致", "color": "#85C982"},
+  {"type": "contrasts", "label": "结果差异", "color": "#F18C73"}
+]

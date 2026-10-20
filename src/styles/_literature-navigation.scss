@@ -1,0 +1,52 @@
+/* Implemented by Codex (LLM agent): literature navigation and transient highlighting. */
+.literature-navigation-panel {
+  padding: 16px;
+  overflow-y: auto;
+  h3 { margin-top: 0; }
+  h4 { margin: 18px 0 8px; line-height: 1.45; }
+  p { line-height: 1.5; }
+  button { height: auto; min-height: 28px; white-space: normal; padding: 5px 9px; text-align: left; }
+  .literature-nav-actions { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+  .literature-nav-muted { font-size: var(--font-ui-small); color: var(--text-muted); }
+  .literature-nav-section { width: 100%; margin: 12px 0; }
+  .literature-nav-count { font-weight: 600; margin-bottom: 4px; }
+  .literature-nav-relation { border-top: 1px solid var(--background-modifier-border); padding: 14px 0; }
+  .literature-nav-relation-title { margin-top: 5px; line-height: 1.5; }
+  .literature-nav-view-link { display: block; width: 100%; margin: 6px 0; overflow-wrap: anywhere; }
+  details { font-size: var(--font-ui-small); margin-top: 8px; }
+  summary { cursor: pointer; color: var(--text-muted); }
+  .literature-nav-error { color: var(--text-error); overflow-wrap: anywhere; }
+  .literature-nav-status { color: var(--text-accent); }
+  .literature-nav-evidence { padding: 12px; border: 1px solid var(--background-modifier-border); }
+  .literature-nav-legend-row {display:flex;align-items:center;gap:8px;margin:7px 0;}
+  .literature-nav-swatch {display:inline-block;width:24px;height:4px;border-radius:2px;}
+}
+.canvas-node.literature-nav-dim, .canvas-edges .literature-nav-dim { opacity: .16; }
+.canvas-node.literature-nav-neighbor { box-shadow: 0 0 0 2px var(--interactive-accent); }
+/* Label wrappers are siblings of the SVG paths and need their own focus state. */
+.literature-nav-overview .literature-nav-edge {opacity:.5;}
+.literature-nav-overview .literature-nav-edge.literature-nav-neighbor {opacity:1;}
+.literature-nav-overview .literature-nav-edge.literature-nav-dim {opacity:.14;}
+.literature-nav-overview .literature-nav-edge-label {opacity:0;visibility:hidden;pointer-events:none;}
+.literature-nav-overview .literature-nav-edge-label.literature-nav-label-visible {opacity:1;visibility:visible;pointer-events:auto;}
+.literature-nav-overview .literature-nav-edge-label.literature-nav-dim {opacity:.14;}
+.canvas-node:has(.literature-paper-card) .markdown-preview-view {display:block !important;padding:0 !important;scrollbar-gutter:auto;}
+.canvas-node:has(.literature-paper-card) .markdown-preview-view::before,
+.canvas-node:has(.literature-paper-card) .markdown-preview-view::after {display:none !important;}
+.canvas-node:has(.literature-paper-card) .markdown-preview-sizer {min-height:0 !important;padding:0 !important;width:100%;}
+.canvas-node:has(.literature-paper-card) .markdown-preview-pusher {display:none;}
+.literature-paper-card {box-sizing:border-box;padding:18px 20px;width:100%;font-family:system-ui,sans-serif;text-align:left;}
+.literature-paper-title {font-size:18px;line-height:26px;font-weight:600;overflow-wrap:anywhere;white-space:normal;}
+.literature-paper-author {font-size:14px;line-height:22px;margin-top:10px;color:var(--text-muted);overflow-wrap:anywhere;}
+.literature-spectrum-base {stroke-opacity:0 !important;}
+.literature-spectrum-segment {fill:none !important;stroke-linecap:butt;stroke-linejoin:round;pointer-events:none;}
+
+/* Codex (LLM agent): keep embedded paper trees readable at their declared font size. */
+.mermaid:has(g[id^="flowchart-paper_root-"]) {
+  display: block;
+  overflow: auto;
+  max-height: 72vh;
+}
+.mermaid svg:has(g[id^="flowchart-paper_root-"]) {
+  max-width: none !important;
+}

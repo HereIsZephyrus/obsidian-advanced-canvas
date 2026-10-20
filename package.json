@@ -3,8 +3,9 @@
   "scripts": {
     "postinstall": "patch-package",
     "dev": "node esbuild.config.mjs",
-    "build": "node esbuild.config.mjs production",
-    "lint": "eslint src/ --ext .ts,.tsx"
+    "build": "node scripts/build-literature.mjs && node esbuild.config.mjs production",
+    "lint": "eslint src/ --ext .ts,.tsx",
+    "test:literature": "node scripts/build-literature.mjs && node --test tests/literature-routing.test.mjs tests/literature-navigation.test.mjs tests/literature-overview.test.mjs"
   },
   "devDependencies": {
     "@obsidian-typings/obsidian-public-latest": "^6.32.0",
@@ -21,6 +22,7 @@
     "esbuild-plugin-copy": "^2.1.1",
     "esbuild-sass-plugin": "^3.3.1",
     "html-to-image": "1.11.11",
+    "libavoid-js": "0.5.0-beta.5",
     "monkey-around": "^2.3.0",
     "sass": "^1.70.0",
     "tiny-jsonc": "^1.0.1"

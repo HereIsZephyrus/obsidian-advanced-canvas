@@ -14,3 +14,26 @@
 @use "styles/presentation";
 @use "styles/portals";
 @use "styles/embeds";
+// Added by Codex (LLM agent): compact literature structure cards.
+@use "styles/literature";
+// Implemented by Codex (LLM agent): navigation side panel styles.
+@use 'styles/literature-navigation';
+
+/* Added by Codex (LLM agent): short leaders for labels beside crowded routes. */
+.literature-label-leader { fill: none; stroke: var(--canvas-color); stroke-width: 1; stroke-dasharray: 3 3; opacity: .65; pointer-events: none; }
+.literature-route-label { padding: 0 !important; }
+.literature-route-label > .canvas-path-label {
+  font-size: 16px !important;
+  line-height: 20px !important;
+  padding: 4px 8px !important;
+  border: 0 !important;
+  width: var(--literature-label-width) !important;
+  height: var(--literature-label-height) !important;
+  min-width: 0 !important;
+  max-width: none !important;
+  box-sizing: border-box;
+  white-space: nowrap;
+  text-align: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

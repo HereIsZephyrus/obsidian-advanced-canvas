@@ -34,6 +34,8 @@ export interface CanvasHistory {
   max: number
 
   applyHistory: (data: CanvasElementsData) => void
+  // Added by Codex (LLM agent): update routed geometry within the same undo step.
+  replace: (data: CanvasElementsData) => void
   canUndo: () => boolean
   undo: () => CanvasElementsData | null
   canRedo: () => boolean

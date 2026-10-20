@@ -1,3 +1,6 @@
+// Modified by Codex (LLM agent): integrate persisted literature routing.
+import LiteratureRoutingController from './literature-routing/controller'
+import LiteratureNavigationController from './literature-navigation/controller'
 import { Plugin, requireApiVersion, TextFileView } from 'obsidian'
 import { Canvas, CanvasView } from './@types/Canvas'
 
@@ -129,6 +132,8 @@ const CANVAS_EXTENSIONS: CanvasExtensionConstructor[] = [
 ]
 
 export default class AdvancedCanvasPlugin extends Plugin {
+  literatureRouting: LiteratureRoutingController
+  literatureNavigation: LiteratureNavigationController
   debugHelper: DebugHelper
 
   settings: SettingsManager
@@ -163,6 +168,9 @@ export default class AdvancedCanvasPlugin extends Plugin {
         return undefined
       }
     }).filter((e): e is CanvasExtension => e !== undefined)
+    this.literatureRouting = new LiteratureRoutingController(this)
+    // Implemented by Codex (LLM agent): enable navigation only in configured vaults.
+    this.literatureNavigation = new LiteratureNavigationController(this)
   }
 
   onunload() {}
