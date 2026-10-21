@@ -12,6 +12,86 @@ const queue = await import(queueUrl)
 const focusBuild = await build({entryPoints:['src/literature-navigation/focus.ts'],bundle:true,write:false,platform:'node',format:'esm'})
 const {overviewFocus} = await import('data:text/javascript;base64,' + Buffer.from(focusBuild.outputFiles[0].text).toString('base64'))
 
+// Codex (LLM agent): exercise deferred Obsidian leaves through the controller.
+const controllerBuild = await build({entryPoints:['src/literature-navigation/controller.ts'],bundle:true,write:false,platform:'node',format:'esm',
+  plugins:[{name:'obsidian-test-api',setup(build){
+    build.onResolve({filter:/^obsidian$/},()=>({path:'obsidian',namespace:'test'}))
+    build.onLoad({filter:/.*/,namespace:'test'},()=>({contents:`
+      export const requestUrl=async()=>{throw Error("Unexpected HTTP call")};
+      export class ItemView { constructor(leaf) { this.contentEl=leaf.contentEl } }
+      export class MarkdownView {}
+      export class Notice {}
+      export class TFile {}
+      export class TAbstractFile {}
+      export class WorkspaceLeaf {}
+      export class FuzzySuggestModal {}
+      export const Platform={isDesktopApp:true};
+    `,loader:'js'}))
+  }}]})
+const {default: NavigationController} = await import('data:text/javascript;base64,' + Buffer.from(controllerBuild.outputFiles[0].text).toString('base64'))
+
+async function navigationController(t) {
+  for (const [key,value] of Object.entries({window:{setInterval:()=>0,clearTimeout(){}},document:{}})) {
+    const previous=Object.getOwnPropertyDescriptor(globalThis,key)
+    Object.defineProperty(globalThis,key,{value,configurable:true})
+    t.after(()=>{if(previous)Object.defineProperty(globalThis,key,previous);else delete globalThis[key]})
+  }
+  let factory
+  const leaves=[]
+  const workspace={on(){},getLeavesOfType:()=>leaves}
+  const plugin={app:{workspace,vault:{on(){},adapter:{exists:async()=>false}}},
+    registerView(_type,create){factory=create},addRibbonIcon(){},addCommand(){},
+    registerEvent(){},registerDomEvent(){},register(){},registerInterval(){}}
+  const controller=new NavigationController(plugin)
+  await controller.ready
+  const content=()=>({clears:0,titles:[],empty(){this.clears++;this.titles=[]},
+    addClass(){},createEl(_tag,options){this.titles.push(options.text);return this}})
+  return {controller,leaves,workspace,content,createView:leaf=>factory(leaf)}
+}
+
+test('a deferred navigation sidebar does not break background refresh', async t => {
+  const {controller,leaves}=await navigationController(t)
+  const deferred={view:{getViewType:()=>model.NAV_VIEW},isDeferred:true}
+  leaves.push(deferred)
+  controller.corpus={}
+  controller.currentPath=()=>undefined
+  controller.currentCanvas=()=>undefined
+  await assert.doesNotReject(()=>controller.refresh())
+  assert.equal(deferred.isDeferred,true)
+  assert.equal(deferred.view.contentEl,undefined)
+})
+
+test('loaded navigation panels render while deferred panels stay unloaded', async t => {
+  const {controller,leaves,content,createView}=await navigationController(t)
+  const active={contentEl:content()};active.view=createView(active)
+  leaves.push({view:{getViewType:()=>model.NAV_VIEW},isDeferred:true},active)
+  controller.renderAll()
+  assert.equal(active.contentEl.clears,1)
+  assert(active.contentEl.titles.includes('文献关系'))
+})
+
+test('revealing a deferred panel renders the latest selection', async t => {
+  const {controller,leaves,workspace,content,createView}=await navigationController(t)
+  const leaf={view:{getViewType:()=>model.NAV_VIEW},isDeferred:true,
+    async setViewState(){}}
+  leaves.push(leaf)
+  const rendered=[]
+  controller.render=()=>rendered.push(controller.context.paper)
+  controller.refresh=async()=>{controller.context={paper:'selected-paper'};controller.renderAll()}
+  await controller.refresh()
+  assert.deepEqual(rendered,[])
+  workspace.revealLeaf=async target=>{
+    assert.equal(target,leaf)
+    await Promise.resolve()
+    target.contentEl=content();target.view=createView(target);target.isDeferred=false
+    await target.view.onOpen()
+  }
+  await controller.show()
+  assert.equal(leaf.isDeferred,false)
+  assert(rendered.length>0)
+  assert(rendered.every(p=>p==='selected-paper'))
+})
+
 test('external corpus additions resolve new papers and reject incomplete relation endpoints', () => {
   const paper = id => ({source:`${id}_content.md`,note:`${id}_notes.md`,tree_path:`${id}_notes.md`})
   const corpus = {version:1,bundle:{papers:{A:paper('a')},relations:[],endpoint_map:{A:{}}},nodes:{A:{}},sourceHashes:{}}
@@ -140,4 +220,101 @@ test('paper pairs stay separate inside a component and retired selection resolve
   assert.equal(model.redirectPosition(parsed,{...previous,selection:['demo-root-A','demo-root-B']}).path,ab.path)
   parsed.forest.pairs['pair-A-B'].relations.push('bc')
   assert.throws(()=>model.parseCorpus(JSON.stringify(parsed)),/归属不一致/)
+})
+
+// Codex (LLM agent): remote catalogs never imply that content was downloaded.
+const remoteBuild=await build({entryPoints:['src/literature-navigation/remote.ts'],bundle:true,write:false,platform:'node',format:'esm',
+  plugins:[{name:'remote-http',setup(build){build.onResolve({filter:/^obsidian$/},()=>({path:'obsidian',namespace:'test'}));
+    build.onLoad({filter:/.*/,namespace:'test'},()=>({contents:'export const requestUrl=()=>{throw Error("Unexpected transport call")}',loader:'js'}))}}]})
+const {RemoteCorpus}=await import('data:text/javascript;base64,'+Buffer.from(remoteBuild.outputFiles[0].text).toString('base64'))
+function remoteFixture() {
+  let revision='v1'
+  const calls=[]
+  const papers=Object.fromEntries(['A','B','C'].map(k=>[k,{title:k,authors:['Author'],source:k+'_content.md',note:k+'_notes.md',tree_path:k+'_notes.md'}]))
+  const forest={version:2,components:{one:{papers:['A','B','C'],revision:1,relationship:'network/relationship/one.canvas'}},
+    pairs:{'pair-A-B':{papers:['A','B'],relations:['ab'],revision:1,path:'network/connecting/pair-A-B.canvas'},
+      'pair-B-C':{papers:['B','C'],relations:['bc'],revision:1,path:'network/connecting/pair-B-C.canvas'}},paper_component:{A:'one',B:'one',C:'one'},redirects:{}}
+  const call=async(name,args)=>{
+    calls.push({name,args})
+    if(args.revision && args.revision!==revision)throw Error('STALE_REVISION')
+    if(name==='litnet_status')return {revision}
+    if(name==='litnet_catalog')return {revision,papers,forest,page:{total:3,next_offset:null}}
+    if(name==='litnet_query') {
+      const second=args.offset>0,id=second?'bc':'ab',a=second?'B':'A',b=second?'C':'B'
+      return {revision,papers,nodes:{[a]:{m:{label:'Methods',parent:null}},[b]:{m:{label:'Methods',parent:null}}},
+        endpoint_map:{[a]:{[id+'-from']:'m'},[b]:{[id+'-to']:'m'}},source_hashes:{},
+        relations:[{id,from_paper:a,to_paper:b,type:'same_method',...(args.include_evidence?{from_quote:'evidence'}:{})}],
+        page:{total:2,next_offset:second?null:100}}
+    }
+    throw Error(name)
+  }
+  return {calls,call,remote:new RemoteCorpus(call),change:()=>{revision='v2'}}
+}
+test('remote navigation downloads paged scopes once and drops caches on revision change',async()=>{
+  const f=remoteFixture(),scope={kind:'paper',paper_ids:['B']}
+  assert.equal(await f.remote.sync(),true)
+  assert.equal(f.remote.corpus.bundle.relations.length,0)
+  assert.equal(f.calls.some(c=>c.name==='litnet_query'),false)
+  await Promise.all([f.remote.hydrate(scope),f.remote.hydrate(scope)])
+  assert.equal(f.calls.filter(c=>c.name==='litnet_query').length,2)
+  assert.equal(f.remote.corpus.bundle.relations.length,2)
+  assert(f.calls.filter(c=>c.name==='litnet_query').every(c=>c.args.scope===scope))
+  await f.remote.hydrate(scope,true)
+  assert.equal(f.remote.corpus.bundle.relations[0].from_quote,'evidence')
+  f.change();assert.equal(await f.remote.sync(true),true)
+  assert.equal(f.remote.corpus.bundle.relations.length,0)
+  await f.remote.hydrate(scope)
+  assert.equal(f.calls.at(-1).args.revision,'v2')
+})
+test('a server revision change during pagination cannot mix fragments',async()=>{
+  const f=remoteFixture()
+  const remote=new RemoteCorpus(async(name,args)=>{
+    const value=await f.call(name,args)
+    if(name==='litnet_query'&&args.offset===0)f.change()
+    return value
+  })
+  await remote.sync()
+  await assert.rejects(remote.hydrate({kind:'paper',paper_ids:['B']}),/STALE_REVISION/)
+  assert.equal(remote.corpus.bundle.relations.length,0)
+})
+test('remote mode preserves local Canvas generation jobs without running or recreating files',async t=>{
+  const {controller}=await navigationController(t)
+  const f=remoteFixture();await f.remote.sync()
+  controller.remote=f.remote;controller.corpus=f.remote.corpus;controller.config={root:'network'}
+  controller.state.jobs=[{id:'old',status:'pending'}]
+  controller.plugin.app.vault.getAbstractFileByPath=()=>undefined
+  await controller.work()
+  assert.equal(controller.state.jobs[0].status,'pending')
+  await assert.rejects(controller.ensure(model.pairView(controller.corpus,'A','B')),/尚未同步/)
+  assert.deepEqual(controller.neighborCandidates({papers:['A','B']}),['C'])
+})
+
+// Codex (LLM agent): verify the real MCP client against a local HTTP transport.
+test('MCP client authenticates, initializes once, and closes its pooled connections',async t=>{
+  const {createRequire}=await import('node:module')
+  const {createServer}=await import('node:http')
+  const {mkdtemp,writeFile,rm}=await import('node:fs/promises')
+  const {tmpdir}=await import('node:os')
+  const {join}=await import('node:path')
+  const previous=globalThis.require;globalThis.require=createRequire(import.meta.url)
+  const folder=await mkdtemp(join(tmpdir(),'litnet-client-'))
+  const tokenFile=join(folder,'token');await writeFile(tokenFile,'t'.repeat(40),{mode:0o600})
+  const methods=[],sockets=new Set()
+  const server=createServer(async(req,res)=>{
+    assert.equal(req.headers.authorization,'Bearer '+'t'.repeat(40))
+    const chunks=[];for await(const chunk of req)chunks.push(chunk)
+    const body=JSON.parse(Buffer.concat(chunks).toString());methods.push(body.method)
+    if(body.method==='notifications/initialized'){assert.equal(body.id,undefined);res.writeHead(202);res.end();return}
+    const result=body.method==='initialize'?{serverInfo:{name:'litnet'}}:{content:[{type:'text',text:JSON.stringify({ok:true})}]}
+    res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify({jsonrpc:'2.0',id:body.id,result}))
+  })
+  server.on('connection',socket=>sockets.add(socket))
+  await new Promise(r=>server.listen(0,'127.0.0.1',r))
+  const {mcpCall}=await import('data:text/javascript;base64,'+Buffer.from(remoteBuild.outputFiles[0].text).toString('base64'))
+  const call=mcpCall({url:`http://127.0.0.1:${server.address().port}/mcp`,tokenFile})
+  t.after(async()=>{call.dispose();await new Promise(r=>server.close(r));await rm(folder,{recursive:true});if(previous)globalThis.require=previous;else delete globalThis.require})
+  assert.deepEqual(await call('litnet_status',{}),{ok:true})
+  assert.deepEqual(await call('litnet_status',{}),{ok:true})
+  assert.deepEqual(methods,['initialize','notifications/initialized','tools/call','tools/call'])
+  assert.equal(sockets.size,1)
 })

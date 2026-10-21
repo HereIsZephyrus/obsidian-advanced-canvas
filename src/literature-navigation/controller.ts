@@ -6,6 +6,7 @@ import type { Canvas, CanvasEdge, CanvasElement, CanvasView } from '../@types/Ca
 import {measurePaper, OVERVIEW_VERSION, relationStyles} from './presentation'
 import {serializeWrite, waitForWrites} from './save-queue'
 import {overviewFocus} from './focus'
+import {RemoteCorpus, mcpCall, type Scope} from './remote'
 import {
   NAV_VIEW, STORE, type Corpus, type Config, type NavState, type NavPosition, type ViewSpec, type Job,
   type Relation, type Heading, pairId, paperForPath, relationsFor, sideFor, endpoint, quotes,
@@ -57,6 +58,7 @@ export default class LiteratureNavigationController {
   private forks = new Map<string, string>()
   private timer?: number
   private positionTimer?: number
+  private remote?: RemoteCorpus
   private corpusStamp?: string
   private corpusRefresh?: Promise<boolean>
   private evidence?: {paper: string; relation: string; side: 'from' | 'to'; status: string; quote: string}
@@ -121,6 +123,7 @@ export default class LiteratureNavigationController {
     }, true)
     plugin.register(() => {
       this.disposed = true
+      this.remote?.dispose()
       window.clearTimeout(this.timer); window.clearTimeout(this.positionTimer)
       this.children.forEach(child => child.kill())
       this.plugin.getCanvases().forEach(canvas => this.clearHighlight(canvas))
@@ -128,7 +131,7 @@ export default class LiteratureNavigationController {
     })
     this.ready = this.load()
     plugin.registerInterval(window.setInterval(() => {
-      if (this.corpus && !this.disposed) this.run(async () => {
+      if (this.config && !this.disposed) this.run(async () => {
         if (await this.reloadCorpus()) { await this.rebuild(); this.schedule() }
       })
     }, 1500))
@@ -147,7 +150,9 @@ export default class LiteratureNavigationController {
     try {
       this.config = JSON.parse(await adapter.read(`${STORE}/config.json`)) as Config
       if (!safeRelative(this.config.root) || !safeRelative(this.config.corpus)) throw new Error('导航配置路径无效')
-      await this.reloadCorpus()
+      if (this.config.remote) this.remote = new RemoteCorpus(mcpCall(this.config.remote))
+      try { await this.reloadCorpus() }
+      catch (error) { new Notice(`文献服务暂不可用，将自动重连：${String(error)}`,8000) }
       await waitForWrites(this.basePath())
       if (await adapter.exists(`${STORE}/state.json`)) this.state = JSON.parse(await adapter.read(`${STORE}/state.json`)) as NavState
       for (const job of this.state.jobs) if (job.status === 'running') job.status = 'pending'
@@ -165,6 +170,11 @@ export default class LiteratureNavigationController {
     if (this.corpusRefresh) return this.corpusRefresh
     const path = this.config.corpus, adapter = this.plugin.app.vault.adapter
     this.corpusRefresh = (async () => {
+      if (this.remote) {
+        const changed = await this.remote.sync()
+        if (!this.disposed) this.corpus = this.remote.corpus
+        return changed
+      }
       const stat = await adapter.stat(path)
       if (!stat || stat.type !== 'file') throw new Error('文献语料文件不存在')
       const stamp = `${path}:${stat.mtime}:${stat.size}`
@@ -278,6 +288,25 @@ export default class LiteratureNavigationController {
       this.lastPosition = this.capture()
     }
     if (serial !== this.refreshSerial) return
+    if (this.remote) {
+      const scopes: Scope[] = []
+      if (context.paper) scopes.push(context.node ? {kind:'node',paper_ids:[context.paper],node_id:context.node} : {kind:'paper',paper_ids:[context.paper]})
+      else if (context.relations?.length) {
+        for (const pair of Object.values(this.corpus.forest?.pairs || {}))
+          if (pair.relations.some(r=>context.relations!.includes(r))) scopes.push({kind:'pair',paper_ids:pair.papers})
+      }
+      if (scopes.length) {
+        try { await Promise.all(scopes.map(scope=>this.remote!.hydrate(scope,!!context.text))) }
+        catch (error) {
+          if (!String(error).includes('STALE_REVISION')) throw error
+          await this.remote.sync(true)
+          if (serial !== this.refreshSerial || this.disposed) return
+          await Promise.all(scopes.map(scope=>this.remote!.hydrate(scope,!!context.text)))
+        }
+        this.corpus = this.remote.corpus
+      }
+    }
+    if (serial !== this.refreshSerial || this.disposed) return
     this.context = context
     this.renderAll()
   }
@@ -291,7 +320,10 @@ export default class LiteratureNavigationController {
     await this.refresh()
   }
   private renderAll() {
-    this.plugin.app.workspace.getLeavesOfType(NAV_VIEW).forEach(leaf => this.render((leaf.view as NavigationView).contentEl))
+    // Codex (LLM agent): deferred sidebar leaves have no contentEl; onOpen renders them after loading.
+    for (const leaf of this.plugin.app.workspace.getLeavesOfType(NAV_VIEW)) {
+      if (leaf.view instanceof NavigationView) this.render(leaf.view.contentEl)
+    }
   }
   private button(parent: HTMLElement, label: string, action: () => Promise<unknown>, cls?: string) {
     const b = parent.createEl('button', {text: label, cls})
@@ -386,6 +418,7 @@ export default class LiteratureNavigationController {
       box.createEl('summary', {text: this.evidence.status})
       box.createEl('p', {text: this.evidence.quote})
     }
+    if (this.remote) return
     const pending = this.state.jobs.filter(j => j.status === 'pending' || j.status === 'running')
     if (pending.length) el.createEl('p', {text: `生成队列：${pending.length} 项`, cls: 'literature-nav-status'})
     for (const job of this.state.jobs.filter(j => j.status === 'failed')) {
@@ -496,6 +529,7 @@ export default class LiteratureNavigationController {
     const spec = componentView(this.corpus, key, 'relationship') || this.state.views.overview
     if (!spec) throw new Error('未找到所属文献网络')
     const intent = ++this.navigationIntent
+    if (this.remote) { await this.remote.sync(true); this.corpus=this.remote.corpus; await this.openSpec(spec); await this.show(); return }
     const view = await this.enqueue({...spec, revision: spec.revision + 1, presentationVersion: OVERVIEW_VERSION})
     if (this.disposed || intent !== this.navigationIntent) return
     await this.openSpec(view)
@@ -522,6 +556,11 @@ export default class LiteratureNavigationController {
   }
   neighborCandidates(view: ViewSpec) {
     const current = new Set(view.papers), result = new Set<string>()
+    if (this.remote) {
+      for (const pair of Object.values(this.corpus!.forest?.pairs || {})) {
+        if (pair.papers.some(k=>current.has(k))) for (const k of pair.papers) if (!current.has(k)) result.add(k)
+      }
+    }
     for (const r of this.corpus!.bundle.relations) {
       if (current.has(r.from_paper) && !current.has(r.to_paper)) result.add(r.to_paper)
       if (current.has(r.to_paper) && !current.has(r.from_paper)) result.add(r.from_paper)
@@ -567,9 +606,11 @@ export default class LiteratureNavigationController {
     if (this.corpus?.forest) spec = canonicalView(this.corpus, spec)
     const exists = this.plugin.app.vault.getAbstractFileByPath(spec.path)
     if (exists instanceof TFile) return spec
+    if (this.remote) throw new Error(`Canvas 尚未同步到本机：${spec.path}`)
     return this.enqueue(spec)
   }
   private async enqueue(view: ViewSpec, basePath?: string): Promise<ViewSpec> {
+    if (this.remote) throw new Error('视图由 center 发布，请等待 Canvas 同步')
     let job = this.state.jobs.find(j => ['pending', 'running'].includes(j.status) && j.view.id === view.id && JSON.stringify(j.view.papers) === JSON.stringify(view.papers))
     if (!job) {
       job = {id: randomUUID(), view: clone(view), basePath, status: 'pending'}
@@ -617,7 +658,7 @@ export default class LiteratureNavigationController {
     }
   }
   private async work() {
-    if (this.running || this.disposed || !this.config) return
+    if (this.running || this.disposed || !this.config || this.remote) return
     this.running = true
     try {
       for (;;) {
@@ -743,7 +784,7 @@ export default class LiteratureNavigationController {
   }
   async openEvidence(id: string, side: 'from' | 'to') {
     this.navigationIntent++
-    const relation = this.corpus!.bundle.relations.find(r => r.id === id)
+    const relation = this.remote ? await this.remote.evidence(id) : this.corpus!.bundle.relations.find(r => r.id === id)
     if (!relation) throw new Error('关系已不存在')
     const paper = relation[`${side}_paper`], path = this.corpus!.bundle.papers[paper].source
     const file = this.plugin.app.vault.getAbstractFileByPath(path)
@@ -848,7 +889,7 @@ export default class LiteratureNavigationController {
     for (const position of this.state.history) position.path = replace(position.path)
     if (this.state.positions) this.state.positions = Object.fromEntries(Object.entries(this.state.positions).map(([p, value]) => [replace(p), {...value, path: replace(value.path)}]))
     if (this.lastPosition) this.lastPosition.path = replace(this.lastPosition.path)
-    if (changed) await this.plugin.app.vault.adapter.write(this.config.corpus, JSON.stringify(this.corpus, null, 2))
+    if (changed && !this.remote) await this.plugin.app.vault.adapter.write(this.config.corpus, JSON.stringify(this.corpus, null, 2))
     await this.persist(); this.schedule()
   }
 }

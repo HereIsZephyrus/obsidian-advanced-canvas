@@ -38,7 +38,7 @@ export type NavPosition = {
 }
 export type Job = {id: string; view: ViewSpec; basePath?: string; status: 'pending' | 'running' | 'done' | 'failed'; error?: string}
 export type NavState = {version: number; views: Record<string, ViewSpec>; jobs: Job[]; history: NavPosition[]; positions?: Record<string, NavPosition>}
-export type Config = {version: number; root: string; python: string; tools: string; corpus: string}
+export type Config = {version: number; root: string; python: string; tools: string; corpus: string; remote?: {url: string; tokenFile: string}}
 // Codex (LLM agent): reject incomplete external corpus updates before replacing live data.
 export function parseCorpus(text: string): Corpus {
   const value = JSON.parse(text) as Corpus
@@ -125,6 +125,9 @@ export function redirectPosition(corpus: Corpus, position: NavPosition): NavPosi
     id === `paper-${k}` || id === `demo-root-${k}` || id.startsWith(`demo-${k}-`)))
   const edgePairs = new Set(corpus.bundle.relations.filter(r => selected.includes(r.id) || selected.includes(pairId(r.from_paper,r.to_paper)))
     .map(r => pairId(r.from_paper,r.to_paper)))
+  // Codex (LLM agent): catalog routes are sufficient before scoped relations load.
+  for (const [id,pair] of Object.entries(corpus.forest?.pairs || {}))
+    if (selected.includes(id) || pair.relations.some(r=>selected.includes(r))) edgePairs.add(id)
   const candidates = targets.filter(path => {
     const pair = Object.entries(corpus.forest!.pairs || {}).find(([, p]) => p.path === path)
     if (pair) return edgePairs.size ? edgePairs.has(pair[0]) : keys.length > 0 && keys.every(k => pair[1].papers.includes(k))
