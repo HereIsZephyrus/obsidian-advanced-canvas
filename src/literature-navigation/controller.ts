@@ -9,7 +9,7 @@ import {overviewFocus} from './focus'
 import {
   NAV_VIEW, STORE, type Corpus, type Config, type NavState, type NavPosition, type ViewSpec, type Job,
   type Relation, type Heading, pairId, paperForPath, relationsFor, sideFor, endpoint, quotes,
-  shortAuthor, headingAt, headings, locateQuote, relationInHeading, relationLabels, safeRelative, renamePaperPaths, parseCorpus
+  shortAuthor, headingAt, headings, locateQuote, relationInHeading, relationLabels, safeRelative, renamePaperPaths, parseCorpus, componentView, canonicalView, redirectPosition
 } from './model'
 
 type NodeData = {id: string; width?: number; height?: number; literatureCanvas?: {paper?: string; node?: string}}
@@ -24,7 +24,7 @@ const digest = async (text: string) => Array.from(new Uint8Array(await crypto.su
 class PaperPicker extends FuzzySuggestModal<string> {
   constructor(private controller: LiteratureNavigationController, private keys: string[], private choose: (key: string) => void) {
     super(controller.plugin.app)
-    this.setPlaceholder('选择要加入当前阅读网络的文献')
+    this.setPlaceholder('选择文献网络')
   }
   getItems() { return this.keys }
   getItemText(key: string) { return this.controller.corpus!.bundle.papers[key].title }
@@ -66,8 +66,8 @@ export default class LiteratureNavigationController {
     plugin.registerView(NAV_VIEW, leaf => new NavigationView(leaf, this))
     plugin.addRibbonIcon('network', '文献关系', () => this.run(() => this.show()))
     plugin.addCommand({id: 'literature-relations', name: '文献关系：打开当前文献的关系', callback: () => this.run(() => this.show())})
-    plugin.addCommand({id: 'literature-overview', name: '文献关系：打开文献总览', callback: () => this.run(() => this.openOverview())})
-    plugin.addCommand({id: 'literature-refresh-overview', name: '文献关系：更新总览并保留位置', callback: () => this.run(() => this.refreshOverview())})
+    plugin.addCommand({id: 'literature-overview', name: '文献关系：打开所属文献网络', callback: () => this.run(() => this.openOverview())})
+    plugin.addCommand({id: 'literature-refresh-overview', name: '文献关系：更新所属网络并保留位置', callback: () => this.run(() => this.refreshOverview())})
     plugin.addCommand({id: 'literature-back', name: '文献关系：返回刚才的网络', callback: () => this.run(() => this.back())})
     plugin.addCommand({id: 'literature-rebuild-index', name: '文献关系：重建视图索引', callback: () => this.run(async () => { await this.rebuild(); new Notice('视图索引已重建') })})
     plugin.registerEvent(plugin.app.workspace.on('active-leaf-change', leaf => {
@@ -303,7 +303,8 @@ export default class LiteratureNavigationController {
     el.createEl('h3', {text: '文献关系'})
     if (!this.corpus || !this.config) { el.createEl('p', {text: '当前 vault 尚未配置文献导航。'}); return }
     const top = el.createDiv('literature-nav-actions')
-    this.button(top, '文献总览', () => this.openOverview(this.context.paper))
+    this.button(top, '文献网络', () => this.openOverview(this.context.paper))
+    this.button(top, '内容网络', () => this.openComponent('connecting', this.context.paper))
     this.button(top, '返回原视图', () => this.back()).disabled = !this.state.history.length
     const legend = el.createEl('details', {cls:'literature-nav-legend'})
     legend.createEl('summary', {text:'关系颜色'})
@@ -441,20 +442,39 @@ export default class LiteratureNavigationController {
     }
     edge.labelElement?.wrapperEl?.classList.toggle('literature-nav-label-visible',related)
   }
+  // Codex (LLM agent): resolve the current component at navigation time, after queued merges.
+  private async openComponent(layer: 'relationship' | 'connecting', paper?: string) {
+    await this.ready
+    await this.reloadCorpus()
+    if (!this.corpus?.forest) {
+      if (layer === 'relationship' && this.state.views.overview) return this.openSpec(this.state.views.overview)
+      throw new Error('文献网络尚未迁移')
+    }
+    const key = paper || this.context.paper || this.context.view?.papers.find(k => this.corpus!.forest!.paper_component[k])
+    if (!key) {
+      const keys = Object.values(this.corpus.forest.components).map(c => c.papers[0])
+      new PaperPicker(this, keys, chosen => this.run(() => this.openComponent(layer, chosen))).open()
+      return
+    }
+    const spec = componentView(this.corpus, key, layer)
+    if (!spec) throw new Error('未找到所属文献网络')
+    await this.openSpec(spec, [layer === 'relationship' ? `paper-${key}` : `demo-root-${key}`])
+    await this.show()
+  }
   async openOverview(paper?: string) {
     this.navigationIntent++
-    await this.ready
-    const spec = this.state.views.overview
-    if (!spec) throw new Error('未找到文献总览')
-    await this.openSpec(spec, paper ? [`paper-${paper}`] : undefined)
-    await this.show()
+    return this.openComponent('relationship', paper)
   }
   async refreshOverview() {
     await this.ready
-    if (!this.state.views.overview) throw new Error('未找到文献总览')
-    const intent=++this.navigationIntent
-    const view=await this.enqueue({...this.state.views.overview, revision:this.state.views.overview.revision+1, presentationVersion:OVERVIEW_VERSION})
-    if (this.disposed || intent!==this.navigationIntent) return
+    await this.reloadCorpus()
+    const key = this.context.paper || this.context.view?.papers[0]
+    if (!key || !this.corpus) return this.openOverview()
+    const spec = componentView(this.corpus, key, 'relationship') || this.state.views.overview
+    if (!spec) throw new Error('未找到所属文献网络')
+    const intent = ++this.navigationIntent
+    const view = await this.enqueue({...spec, revision: spec.revision + 1, presentationVersion: OVERVIEW_VERSION})
+    if (this.disposed || intent !== this.navigationIntent) return
     await this.openSpec(view)
     await this.show()
   }
@@ -463,8 +483,14 @@ export default class LiteratureNavigationController {
     await this.ready
     await this.reloadCorpus()
     if (!this.config || !this.corpus || a === b || !this.corpus.bundle.papers[a] || !this.corpus.bundle.papers[b]) throw new Error('无效文献对')
-    const id = pairId(a, b)
-    const spec = this.state.views[id] || {id, kind: 'pair', path: `${this.config.root}/内容关系/${id}.canvas`, papers: [a, b].sort(), revision: 1}
+    let spec: ViewSpec
+    if (this.corpus.forest) {
+      if (this.corpus.forest.paper_component[a] !== this.corpus.forest.paper_component[b]) throw new Error('两篇文献尚无连接路径')
+      spec = componentView(this.corpus, a, 'connecting')!
+    } else {
+      const id = pairId(a, b)
+      spec = this.state.views[id] || {id, kind: 'pair', path: `${this.config.root}/内容关系/${id}.canvas`, papers: [a, b].sort(), revision: 1}
+    }
     const view = await this.ensure(spec)
     if (intent !== this.navigationIntent || this.disposed) return
     await this.openSpec(view, focus)
@@ -483,6 +509,7 @@ export default class LiteratureNavigationController {
     await this.reloadCorpus()
     const intent = ++this.navigationIntent
     if (!this.corpus?.bundle.papers[paper]) throw new Error('未知文献')
+    if (this.corpus.forest) return this.openComponent('connecting', paper)
     const fork = this.forks.get(viewId)
     if (fork) viewId = fork
     const known = [...this.state.jobs].reverse().find(j => j.view.id === viewId && j.status !== 'failed')?.view || this.state.views[viewId]
@@ -506,6 +533,7 @@ export default class LiteratureNavigationController {
     return result
   }
   private async ensure(spec: ViewSpec) {
+    if (this.corpus?.forest) spec = canonicalView(this.corpus, spec)
     const exists = this.plugin.app.vault.getAbstractFileByPath(spec.path)
     if (exists instanceof TFile) return spec
     return this.enqueue(spec)
@@ -566,6 +594,8 @@ export default class LiteratureNavigationController {
         if (!job || this.disposed) break
         job.status = 'running'; await this.persist(); this.renderAll()
         try {
+          await this.reloadCorpus()
+          if (this.corpus?.forest) job.view = {...canonicalView(this.corpus, job.view), lastJob: job.id}
           if (!safeRelative(job.view.path) || !job.view.path.startsWith(this.config.root + '/')) throw new Error('视图路径不在导航目录内')
           const vault = this.plugin.app.vault
           await this.flush(job.view.path)
@@ -637,6 +667,8 @@ export default class LiteratureNavigationController {
     } finally { this.navigating--; this.schedule() }
   }
   async openSpec(view: ViewSpec, focus?: string[], record = true) {
+    await this.reloadCorpus()
+    if (this.corpus?.forest) view = canonicalView(this.corpus, view)
     view = await this.ensure(view)
     const leaf = await this.openFile(view.path, record)
     const canvas = (leaf.view as unknown as CanvasView).canvas
@@ -714,11 +746,14 @@ export default class LiteratureNavigationController {
   }
   async back() {
     this.navigationIntent++
+    await this.reloadCorpus()
     let position = this.state.history.pop()
+    if (position && this.corpus) position = redirectPosition(this.corpus, position)
     while (position && !this.plugin.app.vault.getAbstractFileByPath(position.path)) {
       const view = Object.values(this.state.views).find(v => v.path === position!.path)
       if (view) { await this.ensure(view); break }
       position = this.state.history.pop()
+      if (position && this.corpus) position = redirectPosition(this.corpus, position)
     }
     if (!position) { this.renderAll(); return }
     const leaf = await this.openFile(position.path, false)
@@ -739,6 +774,15 @@ export default class LiteratureNavigationController {
   }
   async rebuild() {
     if (!this.config) return
+    if (this.corpus?.forest) {
+      this.state.views = {}
+      this.state.history = this.state.history.map(p => redirectPosition(this.corpus!, p))
+      this.state.positions = Object.fromEntries(Object.values(this.state.positions || {}).map(p => {
+        const next = redirectPosition(this.corpus!, p)
+        return [next.path, next]
+      }))
+      if (this.lastPosition) this.lastPosition = redirectPosition(this.corpus, this.lastPosition)
+    }
     for (const file of this.plugin.app.vault.getFiles().filter(f => f.extension === 'canvas')) {
       await this.indexFile(file, false)
     }
@@ -750,6 +794,7 @@ export default class LiteratureNavigationController {
       const data = JSON.parse(await this.plugin.app.vault.cachedRead(file)) as Drawing
       const view = data.metadata?.literatureNavigation
       if (!view || !['overview', 'pair', 'work'].includes(view.kind) || !Array.isArray(view.papers) || !view.papers.every(p => this.corpus?.bundle.papers[p])) return
+      if (this.corpus?.forest && canonicalView(this.corpus, view).path !== file.path) return
       const existing = this.state.views[view.id]
       if (existing && existing.path !== file.path && this.plugin.app.vault.getAbstractFileByPath(existing.path)) return
       const next = {...view, path: file.path}

@@ -113,3 +113,23 @@ test('navigation paths cannot escape the vault', () => {
   for (const path of ['/tmp/x','../x','nested/../../x','C:\\x','./x']) assert.equal(model.safeRelative(path),false)
   assert.equal(model.safeRelative('Demo/内容关系.canvas'),true)
 })
+
+// Codex (LLM agent): navigation follows connected components through merges and splits.
+test('forest layers share membership and retired paths resolve by selected paper', () => {
+  const paper = k => ({source:`${k}_content.md`,note:`${k}_notes.md`,tree_path:`${k}_notes.md`})
+  const component = (id,papers) => ({papers,revision:2,relationship:`network/relationship/${id}.canvas`,connecting:`network/connecting/${id}.canvas`})
+  const a=component('cA',['A','B']), c=component('cC',['C'])
+  const corpus={version:1,bundle:{papers:{A:paper('A'),B:paper('B'),C:paper('C')},relations:[],endpoint_map:{A:{},B:{},C:{}}},
+    nodes:{A:{},B:{},C:{}},sourceHashes:{},forest:{version:1,components:{cA:a,cC:c},paper_component:{A:'cA',B:'cA',C:'cC'},
+      redirects:{'network/文献总览.canvas':[a.relationship,c.relationship],'network/connecting/old.canvas':[a.connecting]}}}
+  const parsed=model.parseCorpus(JSON.stringify(corpus))
+  for(const layer of ['relationship','connecting']) assert.deepEqual(model.componentView(parsed,'B',layer).papers,['A','B'])
+  assert.equal(model.canonicalView(parsed,{kind:'pair',papers:['A','B'],path:'old.canvas'}).path,a.connecting)
+  const previous={path:'network/文献总览.canvas',selection:['paper-C'],viewport:{x:1,y:2,zoom:1}}
+  assert.equal(model.redirectPosition(parsed,previous).path,c.relationship)
+  assert.equal(model.redirectPosition(parsed,previous).viewport,undefined)
+  assert.equal(model.redirectPosition(parsed,{path:'network/connecting/old.canvas'}).path,a.connecting)
+  assert.equal(model.redirectPosition(parsed,{path:'network/文献总览.canvas'}).path,'network/文献总览.canvas')
+  parsed.forest.components.cC.papers.push('A')
+  assert.throws(()=>model.parseCorpus(JSON.stringify(parsed)),/归属不一致/)
+})

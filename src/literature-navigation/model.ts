@@ -16,11 +16,20 @@ export type Corpus = {
   bundle: {papers: Record<string, Paper>; relations: Relation[]; endpoint_map: Record<string, Record<string, string>>}
   nodes: Record<string, Record<string, {label: string; heading: string; parent: string | null; kind: string}>>
   sourceHashes: Record<string, string>
+  forest?: Forest
+}
+// Codex (LLM agent): both projection layers share one authoritative component registry.
+export type Forest = {
+  version: number
+  components: Record<string, {papers: string[]; revision: number; relationship: string; connecting: string}>
+  paper_component: Record<string, string>
+  redirects: Record<string, string[]>
 }
 export type ViewSpec = {
   id: string; kind: 'overview' | 'pair' | 'work'; path: string
   papers: string[]; revision: number; relations?: string[]; lastJob?: string
   presentationVersion?: number
+  component?: string; layer?: 'relationship' | 'connecting'
 }
 export type NavPosition = {
   path: string; viewport?: {x: number; y: number; zoom: number}
@@ -48,7 +57,53 @@ export function parseCorpus(text: string): Corpus {
       if (!value.bundle.papers[paper] || !node || !value.nodes[paper]?.[node]) throw new Error(`文献关系端点缺失：${relation.id}`)
     }
   }
+  if (value.forest) {
+    const forest = value.forest, covered = new Set<string>()
+    if (forest.version !== 1 || !forest.components || !forest.paper_component || !forest.redirects)
+      throw new Error('文献森林索引不完整')
+    for (const [id, component] of Object.entries(forest.components)) {
+      if (!component.papers.length || !(['relationship', 'connecting'] as const).every(layer =>
+        typeof component[layer] === 'string' && safeRelative(component[layer]) && component[layer].startsWith(`network/${layer}/`)))
+        throw new Error('文献网络路径无效')
+      for (const key of component.papers) {
+        if (!value.bundle.papers[key] || covered.has(key) || forest.paper_component[key] !== id)
+          throw new Error('文献网络归属不一致')
+        covered.add(key)
+      }
+    }
+    if (covered.size !== Object.keys(value.bundle.papers).length || value.bundle.relations.some(r =>
+      forest.paper_component[r.from_paper] !== forest.paper_component[r.to_paper])) throw new Error('文献网络分组不完整')
+  }
   return value
+}
+export function componentView(corpus: Corpus, paper: string, layer: 'relationship' | 'connecting'): ViewSpec | undefined {
+  const forest = corpus.forest, id = forest?.paper_component[paper], component = id && forest?.components[id]
+  if (!component) return
+  return {id: `${id}-${layer}`, component: id, layer, kind: layer === 'relationship' ? 'overview' : 'work',
+    path: component[layer], papers: [...component.papers], revision: component.revision}
+}
+export function canonicalView(corpus: Corpus, view: ViewSpec, paper?: string): ViewSpec {
+  if (!corpus.forest) return view
+  const key = paper || view.papers.find(p => corpus.forest!.paper_component[p])
+  const result = key && componentView(corpus, key, view.layer || (view.kind === 'overview' ? 'relationship' : 'connecting'))
+  if (!result) throw new Error('文献网络已不存在')
+  if (result.id === view.id && result.path === view.path && JSON.stringify(result.papers) === JSON.stringify(view.papers)) {
+    result.revision = Math.max(result.revision, view.revision)
+    result.lastJob = view.lastJob
+  }
+  return result
+}
+export function redirectPosition(corpus: Corpus, position: NavPosition): NavPosition {
+  const targets = corpus.forest?.redirects[position.path]
+  if (!targets?.length) return position
+  const selected = position.selection || []
+  const key = Object.keys(corpus.bundle.papers).find(k => selected.some(id =>
+    id === `paper-${k}` || id === `demo-root-${k}` || id.startsWith(`demo-${k}-`)))
+  const component = key && corpus.forest!.components[corpus.forest!.paper_component[key]]
+  const path = component && targets.find(p => p === component.relationship || p === component.connecting)
+  // Preserve identity selection, but coordinates belong to the retired drawing.
+  if (!path && targets.length > 1) return position
+  return {...position, path: path || targets[0], viewport: undefined}
 }
 export const relationLabels: Record<string, string> = Object.fromEntries(relationStyles.map(s => [s.type, s.label]))
 export function pairId(a: string, b: string): string { return `pair-${[a, b].sort().join('-')}` }
