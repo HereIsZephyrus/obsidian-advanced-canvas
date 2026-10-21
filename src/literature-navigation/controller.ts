@@ -9,7 +9,7 @@ import {overviewFocus} from './focus'
 import {
   NAV_VIEW, STORE, type Corpus, type Config, type NavState, type NavPosition, type ViewSpec, type Job,
   type Relation, type Heading, pairId, paperForPath, relationsFor, sideFor, endpoint, quotes,
-  shortAuthor, headingAt, headings, locateQuote, relationInHeading, relationLabels, safeRelative, renamePaperPaths, parseCorpus, componentView, canonicalView, redirectPosition
+  shortAuthor, headingAt, headings, locateQuote, relationInHeading, relationLabels, safeRelative, renamePaperPaths, parseCorpus, componentView, pairView, canonicalView, redirectPosition
 } from './model'
 
 type NodeData = {id: string; width?: number; height?: number; literatureCanvas?: {paper?: string; node?: string}}
@@ -341,7 +341,7 @@ export default class LiteratureNavigationController {
     if (context.view?.kind && context.view.kind !== 'overview') {
       const current = context.view
       const actions = el.createDiv('literature-nav-actions')
-      this.button(actions, '加入文献', async () => {
+      this.button(actions, this.corpus?.forest?.version === 2 ? '打开相邻文献对' : '加入文献', async () => {
         const keys = this.neighborCandidates(current)
         if (!keys.length) { new Notice('当前范围没有更多相连文献'); return }
         new PaperPicker(this, keys, key => this.run(() => this.extend(current.id, key))).open()
@@ -485,8 +485,9 @@ export default class LiteratureNavigationController {
     if (!this.config || !this.corpus || a === b || !this.corpus.bundle.papers[a] || !this.corpus.bundle.papers[b]) throw new Error('无效文献对')
     let spec: ViewSpec
     if (this.corpus.forest) {
-      if (this.corpus.forest.paper_component[a] !== this.corpus.forest.paper_component[b]) throw new Error('两篇文献尚无连接路径')
-      spec = componentView(this.corpus, a, 'connecting')!
+      const pair = pairView(this.corpus, a, b)
+      if (!pair) throw new Error('两篇文献之间没有已确认的直接关系')
+      spec = pair
     } else {
       const id = pairId(a, b)
       spec = this.state.views[id] || {id, kind: 'pair', path: `${this.config.root}/内容关系/${id}.canvas`, papers: [a, b].sort(), revision: 1}
@@ -509,7 +510,14 @@ export default class LiteratureNavigationController {
     await this.reloadCorpus()
     const intent = ++this.navigationIntent
     if (!this.corpus?.bundle.papers[paper]) throw new Error('未知文献')
-    if (this.corpus.forest) return this.openComponent('connecting', paper)
+    if (this.corpus.forest) {
+      const current = this.state.views[viewId] || this.context.view
+      const peers = current?.papers.filter(k => k !== paper && pairView(this.corpus!, k, paper)) || []
+      if (!peers.length) throw new Error('所选文献与当前视图没有已确认的直接关系')
+      if (peers.length === 1) return this.openPair(peers[0], paper)
+      new PaperPicker(this, peers, key => this.run(() => this.openPair(key, paper))).open()
+      return
+    }
     const fork = this.forks.get(viewId)
     if (fork) viewId = fork
     const known = [...this.state.jobs].reverse().find(j => j.view.id === viewId && j.status !== 'failed')?.view || this.state.views[viewId]

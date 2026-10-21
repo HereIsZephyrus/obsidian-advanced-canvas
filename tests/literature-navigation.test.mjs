@@ -114,22 +114,30 @@ test('navigation paths cannot escape the vault', () => {
   assert.equal(model.safeRelative('Demo/内容关系.canvas'),true)
 })
 
-// Codex (LLM agent): navigation follows connected components through merges and splits.
-test('forest layers share membership and retired paths resolve by selected paper', () => {
+// Codex (LLM agent): one component can contain several stable pair views.
+test('paper pairs stay separate inside a component and retired selection resolves a pair', () => {
   const paper = k => ({source:`${k}_content.md`,note:`${k}_notes.md`,tree_path:`${k}_notes.md`})
-  const component = (id,papers) => ({papers,revision:2,relationship:`network/relationship/${id}.canvas`,connecting:`network/connecting/${id}.canvas`})
-  const a=component('cA',['A','B']), c=component('cC',['C'])
-  const corpus={version:1,bundle:{papers:{A:paper('A'),B:paper('B'),C:paper('C')},relations:[],endpoint_map:{A:{},B:{},C:{}}},
-    nodes:{A:{},B:{},C:{}},sourceHashes:{},forest:{version:1,components:{cA:a,cC:c},paper_component:{A:'cA',B:'cA',C:'cC'},
-      redirects:{'network/文献总览.canvas':[a.relationship,c.relationship],'network/connecting/old.canvas':[a.connecting]}}}
+  const component = {papers:['A','B','C'],revision:2,relationship:'network/relationship/component-A.canvas'}
+  const pair = (a,b,r) => ({papers:[a,b],revision:1,path:`network/connecting/pair-${a}-${b}.canvas`,relations:[r]})
+  const ab=pair('A','B','ab'), bc=pair('B','C','bc')
+  const corpus={version:1,bundle:{papers:{A:paper('A'),B:paper('B'),C:paper('C')},
+    relations:[{id:'ab',from_paper:'A',to_paper:'B'},{id:'bc',from_paper:'B',to_paper:'C'}],
+    endpoint_map:{A:{'ab-from':'m'},B:{'ab-to':'m','bc-from':'m'},C:{'bc-to':'m'}}},
+    nodes:{A:{m:{}},B:{m:{}},C:{m:{}}},sourceHashes:{},forest:{version:2,components:{cA:component},
+      pairs:{'pair-A-B':ab,'pair-B-C':bc},paper_component:{A:'cA',B:'cA',C:'cA'},
+      redirects:{'network/文献总览.canvas':[component.relationship],
+        'network/connecting/old.canvas':[ab.path,bc.path]}}}
   const parsed=model.parseCorpus(JSON.stringify(corpus))
-  for(const layer of ['relationship','connecting']) assert.deepEqual(model.componentView(parsed,'B',layer).papers,['A','B'])
-  assert.equal(model.canonicalView(parsed,{kind:'pair',papers:['A','B'],path:'old.canvas'}).path,a.connecting)
-  const previous={path:'network/文献总览.canvas',selection:['paper-C'],viewport:{x:1,y:2,zoom:1}}
-  assert.equal(model.redirectPosition(parsed,previous).path,c.relationship)
+  assert.deepEqual(model.componentView(parsed,'B').papers,['A','B','C'])
+  assert.deepEqual(model.pairView(parsed,'B','A').papers,['A','B'])
+  assert.equal(model.pairView(parsed,'A','C'),undefined)
+  assert.equal(model.canonicalView(parsed,{kind:'pair',papers:['A','B'],path:'old.canvas'}).path,ab.path)
+  assert.throws(()=>model.canonicalView(parsed,{kind:'work',papers:['A','B','C']}),/请选择/)
+  const previous={path:'network/connecting/old.canvas',selection:['bc'],viewport:{x:1,y:2,zoom:1}}
+  assert.equal(model.redirectPosition(parsed,previous).path,bc.path)
   assert.equal(model.redirectPosition(parsed,previous).viewport,undefined)
-  assert.equal(model.redirectPosition(parsed,{path:'network/connecting/old.canvas'}).path,a.connecting)
-  assert.equal(model.redirectPosition(parsed,{path:'network/文献总览.canvas'}).path,'network/文献总览.canvas')
-  parsed.forest.components.cC.papers.push('A')
+  assert.equal(model.redirectPosition(parsed,{...previous,selection:['demo-root-B']}).path,previous.path)
+  assert.equal(model.redirectPosition(parsed,{...previous,selection:['demo-root-A','demo-root-B']}).path,ab.path)
+  parsed.forest.pairs['pair-A-B'].relations.push('bc')
   assert.throws(()=>model.parseCorpus(JSON.stringify(parsed)),/归属不一致/)
 })

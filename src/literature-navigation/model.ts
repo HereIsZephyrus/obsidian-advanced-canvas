@@ -18,10 +18,11 @@ export type Corpus = {
   sourceHashes: Record<string, string>
   forest?: Forest
 }
-// Codex (LLM agent): both projection layers share one authoritative component registry.
+// Codex (LLM agent): paper components and direct paper pairs have separate identities.
 export type Forest = {
   version: number
-  components: Record<string, {papers: string[]; revision: number; relationship: string; connecting: string}>
+  components: Record<string, {papers: string[]; revision: number; relationship: string; connecting?: string}>
+  pairs?: Record<string, {papers: string[]; revision: number; path: string; relations: string[]}>
   paper_component: Record<string, string>
   redirects: Record<string, string[]>
 }
@@ -59,10 +60,10 @@ export function parseCorpus(text: string): Corpus {
   }
   if (value.forest) {
     const forest = value.forest, covered = new Set<string>()
-    if (forest.version !== 1 || !forest.components || !forest.paper_component || !forest.redirects)
+    if (![1, 2].includes(forest.version) || (forest.version === 2 && !forest.pairs) || !forest.components || !forest.paper_component || !forest.redirects)
       throw new Error('文献森林索引不完整')
     for (const [id, component] of Object.entries(forest.components)) {
-      if (!component.papers.length || !(['relationship', 'connecting'] as const).every(layer =>
+      if (!component.papers.length || !(forest.version === 1 ? ['relationship', 'connecting'] as const : ['relationship'] as const).every(layer =>
         typeof component[layer] === 'string' && safeRelative(component[layer]) && component[layer].startsWith(`network/${layer}/`)))
         throw new Error('文献网络路径无效')
       for (const key of component.papers) {
@@ -73,20 +74,43 @@ export function parseCorpus(text: string): Corpus {
     }
     if (covered.size !== Object.keys(value.bundle.papers).length || value.bundle.relations.some(r =>
       forest.paper_component[r.from_paper] !== forest.paper_component[r.to_paper])) throw new Error('文献网络分组不完整')
+    if (forest.version === 2) {
+      const expected = new Map<string, string[]>()
+      for (const r of value.bundle.relations) {
+        const id = pairId(r.from_paper, r.to_paper)
+        expected.set(id, [...(expected.get(id) || []), r.id])
+      }
+      if (expected.size !== Object.keys(forest.pairs!).length) throw new Error('文献对索引不完整')
+      for (const [id, pair] of Object.entries(forest.pairs!)) {
+        if (pair.papers.length !== 2 || pair.papers[0] === pair.papers[1] || pairId(...pair.papers as [string,string]) !== id ||
+            pair.path !== `network/connecting/${id}.canvas` ||
+            pair.papers.some(k => !value.bundle.papers[k]) ||
+            JSON.stringify([...pair.relations].sort()) !== JSON.stringify(expected.get(id)?.sort()))
+          throw new Error('文献对归属不一致')
+      }
+    }
   }
   return value
 }
-export function componentView(corpus: Corpus, paper: string, layer: 'relationship' | 'connecting'): ViewSpec | undefined {
+export function componentView(corpus: Corpus, paper: string, layer: 'relationship' | 'connecting' = 'relationship'): ViewSpec | undefined {
   const forest = corpus.forest, id = forest?.paper_component[paper], component = id && forest?.components[id]
-  if (!component) return
+  if (!component || (layer === 'connecting' && !component.connecting)) return
   return {id: `${id}-${layer}`, component: id, layer, kind: layer === 'relationship' ? 'overview' : 'work',
-    path: component[layer], papers: [...component.papers], revision: component.revision}
+    path: component[layer]!, papers: [...component.papers], revision: component.revision}
+}
+export function pairView(corpus: Corpus, a: string, b: string): ViewSpec | undefined {
+  const id = pairId(a,b), pair = corpus.forest?.pairs?.[id]
+  if (!pair) return
+  return {id, layer: 'connecting', kind: 'pair', path: pair.path, papers: [...pair.papers],
+    relations: [...pair.relations], revision: pair.revision}
 }
 export function canonicalView(corpus: Corpus, view: ViewSpec, paper?: string): ViewSpec {
   if (!corpus.forest) return view
   const key = paper || view.papers.find(p => corpus.forest!.paper_component[p])
-  const result = key && componentView(corpus, key, view.layer || (view.kind === 'overview' ? 'relationship' : 'connecting'))
-  if (!result) throw new Error('文献网络已不存在')
+  const result = view.kind === 'overview' ? key && componentView(corpus, key) :
+    corpus.forest.version === 1 ? key && componentView(corpus, key, 'connecting') :
+    view.papers.length === 2 && pairView(corpus, view.papers[0], view.papers[1])
+  if (!result) throw new Error('请选择一条文献间连线打开内容关系')
   if (result.id === view.id && result.path === view.path && JSON.stringify(result.papers) === JSON.stringify(view.papers)) {
     result.revision = Math.max(result.revision, view.revision)
     result.lastJob = view.lastJob
@@ -97,13 +121,18 @@ export function redirectPosition(corpus: Corpus, position: NavPosition): NavPosi
   const targets = corpus.forest?.redirects[position.path]
   if (!targets?.length) return position
   const selected = position.selection || []
-  const key = Object.keys(corpus.bundle.papers).find(k => selected.some(id =>
+  const keys = Object.keys(corpus.bundle.papers).filter(k => selected.some(id =>
     id === `paper-${k}` || id === `demo-root-${k}` || id.startsWith(`demo-${k}-`)))
-  const component = key && corpus.forest!.components[corpus.forest!.paper_component[key]]
-  const path = component && targets.find(p => p === component.relationship || p === component.connecting)
-  // Preserve identity selection, but coordinates belong to the retired drawing.
-  if (!path && targets.length > 1) return position
-  return {...position, path: path || targets[0], viewport: undefined}
+  const edgePairs = new Set(corpus.bundle.relations.filter(r => selected.includes(r.id) || selected.includes(pairId(r.from_paper,r.to_paper)))
+    .map(r => pairId(r.from_paper,r.to_paper)))
+  const candidates = targets.filter(path => {
+    const pair = Object.entries(corpus.forest!.pairs || {}).find(([, p]) => p.path === path)
+    if (pair) return edgePairs.size ? edgePairs.has(pair[0]) : keys.length > 0 && keys.every(k => pair[1].papers.includes(k))
+    return keys.some(k => corpus.forest!.components[corpus.forest!.paper_component[k]]?.relationship === path)
+  })
+  const path = targets.length === 1 ? targets[0] : candidates.length === 1 ? candidates[0] : undefined
+  // An ambiguous retired content view cannot silently choose one of its paper pairs.
+  return path ? {...position, path, viewport: undefined} : position
 }
 export const relationLabels: Record<string, string> = Object.fromEntries(relationStyles.map(s => [s.type, s.label]))
 export function pairId(a: string, b: string): string { return `pair-${[a, b].sort().join('-')}` }
