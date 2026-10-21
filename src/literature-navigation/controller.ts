@@ -304,7 +304,7 @@ export default class LiteratureNavigationController {
     if (!this.corpus || !this.config) { el.createEl('p', {text: '当前 vault 尚未配置文献导航。'}); return }
     const top = el.createDiv('literature-nav-actions')
     this.button(top, '文献网络', () => this.openOverview(this.context.paper))
-    this.button(top, '内容网络', () => this.openComponent('connecting', this.context.paper))
+    this.button(top, '内容关系', () => this.openComponent('connecting', this.context.paper))
     this.button(top, '返回原视图', () => this.back()).disabled = !this.state.history.length
     const legend = el.createEl('details', {cls:'literature-nav-legend'})
     legend.createEl('summary', {text:'关系颜色'})
@@ -449,6 +449,29 @@ export default class LiteratureNavigationController {
     if (!this.corpus?.forest) {
       if (layer === 'relationship' && this.state.views.overview) return this.openSpec(this.state.views.overview)
       throw new Error('文献网络尚未迁移')
+    }
+    if (layer === 'connecting' && this.corpus.forest.version === 2) {
+      const current = this.context.view
+      if (current?.kind === 'pair') return this.openPair(current.papers[0], current.papers[1])
+      const selected = new Set(this.corpus.bundle.relations.filter(r => (this.context.relations || []).includes(r.id))
+        .map(r => pairId(r.from_paper, r.to_paper)))
+      if (selected.size === 1) {
+        const pair = this.corpus.forest.pairs?.[[...selected][0]]
+        if (pair) return this.openPair(pair.papers[0], pair.papers[1])
+      }
+      const key = paper || this.context.paper
+      const pairs = Object.values(this.corpus.forest.pairs || {})
+      if (!key) {
+        const keys = [...new Set(pairs.flatMap(p => p.papers))]
+        if (!keys.length) { new Notice('尚无已确认的跨文献关系'); return }
+        new PaperPicker(this, keys, chosen => this.run(() => this.openComponent('connecting', chosen))).open()
+        return
+      }
+      const peers = pairs.filter(p => p.papers.includes(key)).map(p => p.papers.find(k => k !== key)!)
+      if (!peers.length) { new Notice('这篇文献尚无已确认的直接关系'); return }
+      if (peers.length === 1) return this.openPair(key, peers[0])
+      new PaperPicker(this, peers, chosen => this.run(() => this.openPair(key, chosen))).open()
+      return
     }
     const key = paper || this.context.paper || this.context.view?.papers.find(k => this.corpus!.forest!.paper_component[k])
     if (!key) {
